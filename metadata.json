@@ -1,6 +1,6 @@
 {
-  "name": "Copy of KiddoQuest: Learning Adventure",
-  "description": "An interactive educational game for kids aged 1-7 to learn English, Hindi, Maths, and Moral Values through cartoon-style AI interactions and toy rewards.",
+  "name": "KiddoQuest: 10 Level Learning Journey",
+  "description": "A fun 10-level adventure for kids 1-7. Features alphabet matching, math, and morals with magic synthesized sounds.",
   "requestFramePermissions": [
     "microphone"
   ]

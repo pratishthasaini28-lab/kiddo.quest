@@ -15,68 +15,102 @@ const GameEngine: React.FC<GameEngineProps> = ({ subject, level, onFinish }) => 
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; text: string } | null>(null);
   const [points, setPoints] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
-  const bgMusicRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const bgOscillatorRef = useRef<OscillatorNode | null>(null);
 
-  // Sound Effects Generator using Web Audio API
+  // Synthesize Background Music Loop
+  const startBackgroundMusic = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    // Simple friendly chime loop
+    const playChime = (time: number, freq: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, time);
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(0.05, time + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 1);
+      osc.start(time);
+      osc.stop(time + 1);
+    };
+
+    // Schedule a simple 4-note loop
+    const now = ctx.currentTime;
+    [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+      playChime(now + (i * 1.5), f);
+    });
+  };
+
   const playSfx = (type: 'success' | 'fail') => {
-    if (isMuted) return;
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (!audioContextRef.current) return;
+    const ctx = audioContextRef.current;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    
     osc.connect(gain);
     gain.connect(ctx.destination);
     
     if (type === 'success') {
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2); // A5
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2);
       gain.gain.setValueAtTime(0.1, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
     } else {
       osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(200, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.2);
+      osc.frequency.setValueAtTime(150, ctx.currentTime);
       gain.gain.setValueAtTime(0.05, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
     }
-    
     osc.start();
     osc.stop(ctx.currentTime + 0.3);
   };
 
-  useEffect(() => {
-    const load = async () => {
+  const loadData = async () => {
+    try {
       setLoading(true);
+      setError(null);
       const data = await generateQuestions(subject, level);
+      if (data.length === 0) throw new Error("No magic found!");
       setQuestions(data);
+      // Start background music once data is ready
+      startBackgroundMusic();
+    } catch (err) {
+      setError("The Magic Teacher is busy. Let's try once more!");
+    } finally {
       setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+    return () => {
+      if (bgOscillatorRef.current) bgOscillatorRef.current.stop();
     };
-    load();
   }, [subject, level]);
 
   const handleAnswer = (answer: string) => {
     if (feedback) return;
-
     const current = questions[currentIndex];
     const isCorrect = answer.toLowerCase().trim() === current.answer.toLowerCase().trim();
     
-    if (isCorrect) {
-      playSfx('success');
-      setPoints(p => p + 50);
-      setFeedback({ isCorrect: true, text: "SUPER JOB! 🌟🍭" });
-    } else {
-      playSfx('fail');
-      setFeedback({ isCorrect: false, text: "Try again, little hero!" });
-    }
+    playSfx(isCorrect ? 'success' : 'fail');
+    setFeedback({ 
+      isCorrect, 
+      text: isCorrect ? "MAGICAL! ✨🍭" : "Keep trying, hero!" 
+    });
 
-    // Text to Speech for younger kids
-    if (level <= 3) {
-      const utterance = new SpeechSynthesisUtterance(isCorrect ? "Yay!" : "Try again!");
-      utterance.rate = 1.2;
-      window.speechSynthesis.speak(utterance);
+    // TTS for Level 1-2
+    if (level <= 2) {
+      const speech = new SpeechSynthesisUtterance(isCorrect ? "Hooray!" : "Try again!");
+      window.speechSynthesis.speak(speech);
     }
 
     setTimeout(() => {
@@ -91,9 +125,19 @@ const GameEngine: React.FC<GameEngineProps> = ({ subject, level, onFinish }) => 
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <div className="text-9xl mb-8 animate-spin">🎡</div>
-        <p className="font-kids text-3xl text-orange-500 animate-pulse">Magic is loading...</p>
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="text-9xl animate-bounce mb-8">🎪</div>
+        <div className="font-kids text-3xl text-blue-500 animate-pulse">Building your magic world...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center p-12 bg-white rounded-[3rem] shadow-xl border-4 border-red-200 mx-4">
+        <div className="text-7xl mb-4">😿</div>
+        <p className="font-kids text-2xl text-red-500 mb-6">{error}</p>
+        <button onClick={loadData} className="bg-blue-500 text-white font-kids text-xl py-4 px-8 rounded-full shadow-lg">Retry Magic</button>
       </div>
     );
   }
@@ -102,51 +146,50 @@ const GameEngine: React.FC<GameEngineProps> = ({ subject, level, onFinish }) => 
 
   return (
     <div className="max-w-2xl mx-auto px-4">
-      {/* Sound Controls */}
-      <button 
-        onClick={() => setIsMuted(!isMuted)}
-        className="fixed bottom-6 right-6 z-50 bg-white/80 p-4 rounded-full shadow-lg border-2 border-yellow-400 text-2xl"
-      >
-        {isMuted ? '🔇' : '🔊'}
-      </button>
-
-      <div className="bg-white rounded-[4rem] p-10 shadow-2xl relative border-[12px] border-yellow-200">
-        {/* Progress */}
-        <div className="flex justify-between items-center mb-8">
-          <div className="flex gap-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className={`w-8 h-8 rounded-full border-4 ${i <= currentIndex + 1 ? 'bg-green-400 border-green-200' : 'bg-gray-100 border-gray-200'}`} />
-            ))}
+      <div className="bg-white rounded-[4rem] p-8 md:p-12 shadow-2xl relative border-[10px] border-yellow-200">
+        {/* Top Bar */}
+        <div className="flex justify-between items-center mb-10">
+          <div className="bg-blue-50 px-6 py-2 rounded-full border-2 border-blue-200">
+            <span className="font-kids text-blue-500">LEVEL {level}</span>
           </div>
-          <div className="font-kids text-xl text-blue-400">Level {level}</div>
+          <div className="flex gap-1">
+             {questions.map((_, i) => (
+               <div key={i} className={`w-4 h-4 rounded-full ${i <= currentIndex ? 'bg-green-400' : 'bg-gray-100'}`} />
+             ))}
+          </div>
         </div>
 
+        {/* Question Area */}
         <div className="text-center">
-          <h3 className="text-4xl font-kids text-gray-800 mb-8 leading-tight">
+          <h2 className="font-kids text-3xl md:text-4xl text-gray-800 mb-8 leading-tight">
             {current.text}
-          </h3>
+          </h2>
 
           <div className="flex justify-center mb-10 group">
-            <div className="relative p-4 bg-gradient-to-b from-blue-50 to-white rounded-[3rem] shadow-xl border-4 border-dashed border-blue-300 transform group-hover:scale-110 transition-transform">
+            <div className="relative p-4 bg-gradient-to-tr from-pink-50 to-blue-50 rounded-[3rem] border-4 border-dashed border-blue-300 transform group-hover:rotate-2 transition-transform shadow-xl">
               <img 
                 src={`https://loremflickr.com/500/400/cartoon,${encodeURIComponent(current.imageHint || 'toy')}/all`} 
                 alt="hint" 
                 className="rounded-[2rem] max-w-full h-64 object-contain"
+                onError={(e) => {
+                  e.currentTarget.src = "https://via.placeholder.com/500x400/FFEB3B/000000?text=FUN+PIC";
+                }}
               />
-              <div className="absolute -top-6 -left-6 text-6xl animate-bounce">🦄</div>
+              <div className="absolute -top-6 -right-6 text-7xl animate-bounce">🎈</div>
             </div>
           </div>
 
+          {/* Options - Extra large for Level 1 */}
           <div className={`grid ${level === 1 ? 'grid-cols-2' : 'grid-cols-1'} gap-6`}>
             {current.options?.map((opt, i) => (
               <button
                 key={i}
                 disabled={!!feedback}
                 onClick={() => handleAnswer(opt)}
-                className={`p-8 rounded-[2.5rem] border-b-[10px] font-kids text-3xl transition-all transform active:translate-y-2 active:border-b-0
+                className={`p-8 md:p-10 rounded-[3rem] border-b-[12px] font-kids text-4xl md:text-5xl transition-all transform active:translate-y-2 active:border-b-0
                   ${feedback && opt.toLowerCase() === current.answer.toLowerCase() ? 'bg-green-400 border-green-600 text-white' : 
                     feedback && feedback.isCorrect === false && opt.toLowerCase() !== current.answer.toLowerCase() ? 'bg-red-50 border-red-200 opacity-50' : 
-                    'bg-white border-blue-400 text-blue-600 hover:bg-blue-50'}
+                    'bg-white border-blue-300 text-blue-500 hover:bg-blue-50'}
                 `}
               >
                 {opt}
@@ -155,13 +198,14 @@ const GameEngine: React.FC<GameEngineProps> = ({ subject, level, onFinish }) => 
           </div>
         </div>
 
+        {/* Feedback Overlay */}
         {feedback && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-[4rem] z-10 animate-in zoom-in duration-300">
+          <div className="absolute inset-0 flex items-center justify-center bg-white/90 rounded-[4rem] z-20 animate-in zoom-in duration-300">
             <div className="text-center">
-               <div className="text-9xl mb-4 animate-bounce">
+               <div className="text-[12rem] mb-4 animate-bounce">
                  {feedback.isCorrect ? '🍭' : '🎈'}
                </div>
-               <div className={`text-5xl font-kids ${feedback.isCorrect ? 'text-green-500' : 'text-orange-500'}`}>
+               <div className={`text-6xl font-kids ${feedback.isCorrect ? 'text-green-500' : 'text-orange-500'}`}>
                  {feedback.text}
                </div>
             </div>
